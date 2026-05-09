@@ -12,12 +12,7 @@ import os
 from dataclasses import dataclass, field
 
 from providers.base import SubTask, WorkerBackend, WorkerResult, TaskStatus
-
-try:
-    from providers.persona_registry import get_persona_config
-except ImportError:
-    def get_persona_config(persona: str) -> dict:  # type: ignore[misc]
-        return {"system_prefix": ""}
+from providers.persona_registry import get_persona_config
 
 logger = logging.getLogger(__name__)
 

@@ -11,7 +11,7 @@ import json
 import logging
 import re
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 import anthropic
 
@@ -90,7 +90,7 @@ class AnthropicPlanner:
             timeout=self.timeout,
         )
 
-        raw = message.content[0].text
+        raw = cast(Any, message.content[0]).text
         data = _parse_json(raw)
 
         subtasks = [
@@ -130,7 +130,7 @@ class AnthropicPlanner:
             ),
             timeout=self.timeout,
         )
-        return message.content[0].text.strip()
+        return cast(Any, message.content[0]).text.strip()
 
 
 class AnthropicWorker:
@@ -170,7 +170,7 @@ class AnthropicWorker:
                 timeout=self.timeout,
             )
 
-            raw = message.content[0].text
+            raw = cast(str, cast(Any, message.content[0]).text)
             data = _parse_json(raw)
             duration = int((time.monotonic() - start) * 1000)
 

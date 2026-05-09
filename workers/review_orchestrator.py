@@ -16,12 +16,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from providers.base import SubTask, TaskStatus, TaskType, WorkerResult
-
-try:
-    from providers.persona_registry import get_persona_config as _get_persona_config
-except ImportError:
-    def _get_persona_config(persona: str) -> dict:  # type: ignore[misc]
-        return {"system_prefix": ""}
+from providers.persona_registry import get_persona_config as _get_persona_config
 
 logger = logging.getLogger(__name__)
 

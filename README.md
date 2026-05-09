@@ -1,16 +1,24 @@
 # boba-orchestrator
 
-boba-orchestrator is a general-purpose multi-agent orchestrator. Plug in any LLM provider, declare worker personas, dispatch parallelizable tasks.
+A model-agnostic multi-agent orchestrator. **A planner model decomposes tasks; worker models execute them in parallel.** Plug in any LLM backend via a two-method protocol interface.
 
-A planner model decomposes tasks; worker models execute in parallel. Any LLM backend can be plugged in via a two-method protocol interface.
+The core idea is a deliberate cost-tier split: a stronger, more expensive model plans; a faster, cheaper model executes. The orchestrator never imports a specific LLM SDK — it talks to backends through `PlannerBackend` and `WorkerBackend` protocols, so the tier separation is enforced at the architectural level, not bolted on as configuration.
 
-## Clone
+## Quick start
 
 ```bash
 git clone https://github.com/svv2014/boba-orchestrator
 cd boba-orchestrator
-pip install -e ".[dev]"
+python3 -m venv venv && source venv/bin/activate
+pip install -e .
+
+cp config/orchestrator.example.yaml config/orchestrator.yaml
+$EDITOR config/orchestrator.yaml   # set provider, models, projects
+
+python orchestrator.py --dry-run   # preview without executing
 ```
+
+Add `[dev]` to the install (`pip install -e ".[dev]"`) for `ruff` + `pytest`.
 
 ## How It Works
 
@@ -60,27 +68,38 @@ class WorkerBackend(Protocol):
 ```
 
 Built-in providers:
-- **Anthropic** (Claude) — reference implementation, ships with the project
+- **`anthropic`** — Anthropic API (needs `ANTHROPIC_API_KEY`)
+- **`claude-cli`** — local Claude CLI (already authenticated via subscription)
 
-Adding a provider = implementing these two interfaces. See `docs/adding-providers.md` (coming in M8).
+Adding a provider means implementing `PlannerBackend` + `WorkerBackend` and registering it via `providers.registry.register_provider()`. Walkthrough: [`docs/providers.md`](docs/providers.md).
+
+Custom worker personas (system prompts, timeouts, output format) live in [`docs/personas.md`](docs/personas.md).
 
 ## Configuration
 
 ```yaml
 planner:
-  provider: anthropic
-  model: claude-opus-4-6
+  provider: claude-cli
+  model: opus
 
 workers:
-  provider: anthropic
-  model: claude-sonnet-4-6
+  provider: claude-cli
+  model: sonnet
   max_parallel: 3
+
+guardrails:
+  max_worker_timeout_seconds: 1800
+  max_parallel_workers: 3
+  max_total_worker_seconds: 7200
 
 projects:
   - name: my-project
     path: ../my-project
-    issue_filter: "is:open -label:in-progress -label:blocked"  # not yet consumed by github_scanner.py — reserved for future use
 ```
+
+Per-call model override: `--model <id>` overrides `workers.model` for a single quick-mode invocation. Useful when one task warrants a stronger model than the default.
+
+Full configuration reference: [`config/orchestrator.example.yaml`](config/orchestrator.example.yaml). The live `config/orchestrator.yaml` is gitignored (operator-specific).
 
 ## Run
 
@@ -88,8 +107,12 @@ projects:
 # Quick — skip planner, dispatch one worker directly (fastest)
 python orchestrator.py --mode quick "fix the typo in README" --cwd ../my-project
 
+# Quick with a stronger model for this call only
+python orchestrator.py --mode quick "rewrite the spec for #42" --cwd ../my-project \
+    --model claude-opus-4-7
+
 # Background — full pipeline: scan → select → decompose → parallel workers → commit
-python orchestrator.py --mode background --config config/orchestrator.yaml
+python orchestrator.py --mode background
 
 # Queue — continuous: pick task, execute, pick next, repeat until empty or --max-tasks
 python orchestrator.py --mode queue --max-tasks 10
@@ -116,13 +139,20 @@ Prompt injection defense is a core design concern, not an afterthought:
 ## Stack
 
 - Python 3.11+
-- `anthropic` SDK (for Claude backend)
+- `anthropic` SDK (for Claude API backend)
 - `pyyaml`, `gitpython`
 - Docker-friendly, no external DB required
 
-## Status
+## Documentation
 
-Under construction — see [TODO.md](TODO.md) for milestone progress.
+- [`docs/architecture.md`](docs/architecture.md) — the planner/worker split and why it's the core abstraction
+- [`docs/providers.md`](docs/providers.md) — adding a new LLM backend
+- [`docs/personas.md`](docs/personas.md) — registering custom worker personas
+- [`docs/threat-model.md`](docs/threat-model.md) — security boundaries and assumptions
+- [`docs/competitive-analysis.md`](docs/competitive-analysis.md) — vs Symphony / AutoGen / LangGraph
+- [`CHANGELOG.md`](CHANGELOG.md) — release notes
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — local dev, code style, bug reports
+- [`SECURITY.md`](SECURITY.md) — vulnerability disclosure
 
 ## Real-world deployments
 
@@ -131,6 +161,10 @@ The project is in active use as the backbone of **[Boba](https://suprun.ca/boba)
 - **Boba** runs the `background` and `conversational` modes on a schedule, handling GitHub issues, Telegram messages, and autonomous coding tasks.
 - **OpenClaw** hosts the skill ecosystem and config that Boba draws on.
 
+## Status
+
+Active development. See [`CHANGELOG.md`](CHANGELOG.md) for what's shipped, [open issues](https://github.com/svv2014/boba-orchestrator/issues) for what's next.
+
 ## License
 
-MIT (coming in M8)
+[MIT](LICENSE)

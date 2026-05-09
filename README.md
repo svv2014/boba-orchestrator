@@ -20,6 +20,16 @@ python orchestrator.py --dry-run   # preview without executing
 
 Add `[dev]` to the install (`pip install -e ".[dev]"`) for `ruff` + `pytest`.
 
+## How it compares
+
+**vs Symphony (OpenAI)** — Symphony's reconcile-on-startup is stronger for stateful multi-agent workflows within the OpenAI ecosystem. Pick boba-orchestrator when you need model-agnostic execution (GPT, Claude, Gemini, Ollama) or the explicit planner/worker cost split that Symphony's architecture does not enforce.
+
+**vs AutoGen** — AutoGen's conversational agent patterns and Microsoft backing give it the largest community and strongest research lineage. boba-orchestrator wins on explicit cost tiering (a strong planner model, a fast cheap worker pool) and a built-in prompt injection sanitizer; AutoGen has neither by design.
+
+**vs LangGraph** — LangGraph's graph-state model gives it the most flexible control flow of any framework; pick it when your workflow is genuinely graph-shaped and you need LangSmith observability. boba-orchestrator wins on simplicity for plan-then-execute patterns, stateless git-backed state (no database required), and explicit cost tiering — LangGraph has no structural enforcement of which model plans vs. executes.
+
+See [docs/competitive-analysis.md](docs/competitive-analysis.md) for the full comparison.
+
 ## How It Works
 
 ```

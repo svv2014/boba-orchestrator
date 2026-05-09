@@ -95,6 +95,33 @@ orchestrator picks `coder` (or whatever maps from the `TaskType`).
 Personas matter when you want non-coding agents in the loop:
 content review, design, research synthesis, etc.
 
+## Local personas (operator-only, gitignored)
+
+For personas that reference private skills, internal paths, or
+operator-specific tooling, keep them out of version control using the
+local config mechanism:
+
+1. Copy the example file:
+   ```bash
+   cp config/personas.local.example.yaml config/personas.local.yaml
+   ```
+
+2. Edit `config/personas.local.yaml` to add or adjust your personas.
+   The file is listed in `.gitignore` and will never be committed.
+
+3. The registry loads this file automatically at import time — no
+   code change required. If the file is absent, the loader is a
+   silent no-op.
+
+`config/personas.local.example.yaml` (tracked) serves as both
+documentation and a ready-to-copy template. It contains the four
+voice/media persona examples (`qwen-voice-reply`, `kokoro-tts`,
+`voice-project`, `boba-media`) showing the full schema in YAML form.
+
+The local file is merged via `providers.persona_registry.load_local_personas()`.
+You can also call this function directly with a custom path if you need
+to load personas from a non-standard location.
+
 ## Tips
 
 - Lead with **ROLE / SCOPE / OUTPUT FORMAT / CONSTRAINTS** — that

@@ -8,7 +8,13 @@ constraints per role.
 
 from __future__ import annotations
 
-__all__ = ["PERSONA_CONFIGS", "get_persona_config", "list_personas"]
+import pathlib
+
+import yaml
+
+__all__ = ["PERSONA_CONFIGS", "get_persona_config", "list_personas", "load_local_personas"]
+
+_LOCAL_PERSONAS_PATH = pathlib.Path(__file__).parent.parent / "config" / "personas.local.yaml"
 
 PERSONA_CONFIGS: dict[str, dict] = {
     "architect": {
@@ -301,3 +307,20 @@ def get_persona_config(persona: str) -> dict:
 def list_personas() -> list[str]:
     """Return sorted list of registered persona names."""
     return sorted(PERSONA_CONFIGS.keys())
+
+
+def load_local_personas(path: pathlib.Path = _LOCAL_PERSONAS_PATH) -> None:
+    """Merge operator-local personas from a YAML file into PERSONA_CONFIGS.
+
+    Silent no-op when the file does not exist.
+    """
+    if not path.exists():
+        return
+    with path.open() as fh:
+        data = yaml.safe_load(fh)
+    if not isinstance(data, dict):
+        return
+    PERSONA_CONFIGS.update(data)
+
+
+load_local_personas()

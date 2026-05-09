@@ -10,6 +10,9 @@ build/
 # Operator-specific config — copy from config/orchestrator.example.yaml
 config/orchestrator.yaml
 
+# Operator-local persona definitions — copy from config/personas.local.example.yaml
+config/personas.local.yaml
+
 # Local environment file
 .env
 

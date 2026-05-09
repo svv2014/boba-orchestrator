@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "boba-orchestrator"
+version = "0.1.0"
+description = "Model-agnostic multi-agent orchestrator: a planner decomposes tasks, workers execute in parallel"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [
+    { name = "Vadym Suprun" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Typing :: Typed",
+]
+dependencies = [
+    "anthropic>=0.39.0",
+    "pyyaml>=6.0",
+    "gitpython>=3.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.5",
+]
+
+[project.urls]
+Homepage = "https://github.com/svv2014/boba-orchestrator"
+Repository = "https://github.com/svv2014/boba-orchestrator"
+Issues = "https://github.com/svv2014/boba-orchestrator/issues"
+
+[project.scripts]
+orchestrator = "orchestrator:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# Conservative rule set for v0.1.0 — keep what catches real bugs, defer style
+# bikeshedding. Expand once the codebase is uniformly formatted.
+select = ["E", "F", "W"]
+# F841 (unused local var) and E501 (line too long) frequently fire on
+# prompt strings and existing code; allowlist for now. E402 is allowed
+# in orchestrator.py where logger config must precede imports.
+ignore = ["E402", "E501", "F841"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["F401", "F811"]

@@ -1,0 +1,5 @@
+anthropic>=0.39.0
+pyyaml>=6.0
+gitpython>=3.1
+pytest>=8.0
+pytest-asyncio>=0.24

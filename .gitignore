@@ -1,0 +1,19 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# Operator-specific config — copy from config/orchestrator.example.yaml
+config/orchestrator.yaml
+
+# Local environment file
+.env
+
+# Result store / runtime data
+results.db
+*.sqlite
+*.sqlite3

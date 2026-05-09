@@ -1,0 +1,18 @@
+services:
+  orchestrator:
+    build: .
+    image: boba-orchestrator:latest
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+    volumes:
+      # Mount workspace so orchestrator can read/write projects.
+      # Set WORKSPACE_ROOT to point at the directory that contains the
+      # repos listed in config/orchestrator.yaml.
+      - ${WORKSPACE_ROOT:-./workspace}:/workspace
+    working_dir: /app
+    restart: "no"

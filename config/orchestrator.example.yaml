@@ -1,0 +1,45 @@
+# boba-orchestrator example config
+#
+# Copy this to `config/orchestrator.yaml` and fill in your own values.
+# `config/orchestrator.yaml` is gitignored — it is operator-specific.
+#
+# Provider options: "anthropic" (API, needs ANTHROPIC_API_KEY)
+#                   "claude-cli" (local CLI, already authenticated)
+
+planner:
+  provider: claude-cli
+  model: opus
+
+workers:
+  provider: claude-cli
+  model: sonnet
+  max_parallel: 3
+
+# Safety guardrails — the orchestrator runs LLM agents that can execute
+# shell commands and edit files. Tune these for your trust level.
+guardrails:
+  max_worker_timeout_seconds: 1800   # 30 min hard cap per worker
+  max_subtasks_per_plan: 5           # planner can't create more
+  max_parallel_workers: 3            # concurrency limit
+  max_tasks_per_run: 10              # queue mode stops after this
+  max_consecutive_failures: 3        # circuit breaker
+  max_total_worker_seconds: 7200     # 2 hour total budget per run
+
+  # Optional explicit allowlist of paths workers may operate in.
+  # If empty, allowed_repos is auto-populated from `projects:` below.
+  # Add additional paths here if you dispatch workers in worktrees or
+  # ephemeral directories outside of the canonical project paths.
+  # allowed_repos:
+  #   - /tmp/my-worktrees
+
+# Notification channel for run summaries (optional).
+# Currently supported: telegram
+# notify:
+#   channel: telegram
+#   chat_id: "your-chat-id"
+
+# Projects the orchestrator manages. `path` is relative to this config
+# file's parent directory.
+projects:
+  - name: example-project
+    path: ../example-project

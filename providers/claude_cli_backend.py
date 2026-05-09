@@ -54,6 +54,63 @@ def _emit(kind: str, **fields: "Any") -> None:
         pass
 
 DEFAULT_PLANNER_MODEL = "sonnet"
+
+# Default backoff before retrying a transient failure (configurable via env var)
+_DEFAULT_RETRY_DELAY = 30
+
+# Patterns that indicate a transient (retryable) failure — mirrors loop's runner.sh
+# _loop_is_recoverable classifier so retry decisions are consistent across both layers.
+_RECOVERABLE_PATTERNS = [
+    "rate limit",
+    "429",
+    "server error",
+    "5xx",
+    "connection refused",
+    "connection timed out",
+    "network error",
+    "timeout",
+    # Auth-flake: only when "401" appears alongside "auth" context
+    "401",
+]
+
+# Patterns that indicate a permanent failure — never retry these.
+_PERMANENT_PATTERNS = [
+    "tool denied",
+    "sandbox rejection",
+    "permission denied by user",
+    "syntax error",
+    "context window",
+    "context length",
+    "maximum context",
+    "too many tokens",
+]
+
+
+def _is_recoverable(stderr_text: str) -> bool:
+    """Return True if the failure looks transient and should be retried.
+
+    Mirrors the ``_loop_is_recoverable`` classifier in loop's runner.sh so
+    the retry decision is consistent across the orchestrator and loop layers.
+
+    Permanent failures (tool denial, syntax errors, context window exceeded)
+    are detected first and always return False regardless of other signals.
+    """
+    lowered = stderr_text.lower()
+
+    # Permanent patterns take priority — never retry these.
+    for pat in _PERMANENT_PATTERNS:
+        if pat in lowered:
+            return False
+
+    # Auth-flake: "401" is only transient when the word "auth" appears nearby.
+    has_401 = "401" in lowered
+    if has_401 and "auth" not in lowered:
+        # A bare 401 without auth context is not classified as transient.
+        # Remove "401" from consideration by checking remaining patterns.
+        recoverable_without_401 = [p for p in _RECOVERABLE_PATTERNS if p != "401"]
+        return any(pat in lowered for pat in recoverable_without_401)
+
+    return any(pat in lowered for pat in _RECOVERABLE_PATTERNS)
 DEFAULT_WORKER_MODEL = "sonnet"
 DEFAULT_TIMEOUT = 3600  # 60 min default — overridden by planner's estimate per subtask
 
@@ -463,6 +520,37 @@ async def _run_claude(
 
     if proc.returncode != 0:
         error_msg = _format_claude_error(proc.returncode, stdout, stderr)
+
+        # Transient-failure retry: one attempt with a backoff before propagating.
+        # Only applies to exit-1 (not timeouts, which are handled above).
+        if proc.returncode == 1 and _is_recoverable(stderr.decode("utf-8", errors="replace") if stderr else ""):
+            delay = int(os.environ.get("CLAUDE_RETRY_DELAY_SECONDS", _DEFAULT_RETRY_DELAY))
+            logger.warning(
+                "Transient claude failure detected (exit 1). Retrying in %ds. Error: %s",
+                delay, error_msg[:200],
+            )
+            await asyncio.sleep(delay)
+            retry_proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=cwd,
+            )
+            try:
+                retry_stdout, retry_stderr = await asyncio.wait_for(
+                    retry_proc.communicate(), timeout=timeout
+                )
+            except asyncio.TimeoutError:
+                retry_proc.kill()
+                await retry_proc.communicate()
+                raise
+            if retry_proc.returncode == 0:
+                return retry_stdout.decode("utf-8", errors="replace").strip()
+            # Retry failed — overwrite stdout/stderr/error_msg so the rest of the
+            # error-handling path sees the final attempt's output.
+            stdout, stderr = retry_stdout, retry_stderr
+            error_msg = _format_claude_error(retry_proc.returncode, stdout, stderr)
+            logger.error("Retry also failed. Propagating error: %s", error_msg[:200])
 
         # Handle "No conversation found" — session exists in state file but not in Claude's storage
         # This happens with stale session state. Retry as a fresh session with the same ID.

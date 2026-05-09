@@ -129,6 +129,7 @@ async def _run_quick(
     from notifier.telegram_notifier import notify
     from security.guardrails import GuardrailConfig, validate_worker_timeout, validate_target_repo
     from security.sanitizer import sanitize
+    from observability.transcript import Transcript, rotate_old
 
     config = _load_config(config_path)
     if model_override:
@@ -183,9 +184,43 @@ async def _run_quick(
     except Exception as e:
         logger.warning("Result store unavailable: %s", e)
 
+    # Open transcript and rotate old files
+    rotate_old()
+    transcript = Transcript(run_id=run_id)
+    transcript.emit(
+        "task.start",
+        mode="quick",
+        task=task_description,
+        task_type=task_type,
+        cwd=cwd,
+        model=worker_model,
+    )
+
+    # Register transcript for claude.exec events
+    try:
+        from providers.claude_cli_backend import set_active_transcript
+        set_active_transcript(transcript)
+    except Exception:
+        pass
+
     start = time.monotonic()
     result = await worker.execute(subtask)
     elapsed = int(time.monotonic() - start)
+
+    # Deregister transcript
+    try:
+        from providers.claude_cli_backend import set_active_transcript
+        set_active_transcript(None)
+    except Exception:
+        pass
+
+    transcript.emit(
+        "task.done",
+        status=result.status.value,
+        elapsed_s=elapsed,
+        error=result.error,
+    )
+    transcript.close()
 
     if result_store is not None:
         try:
@@ -697,6 +732,7 @@ async def _run_background_with_task(
     from security.sanitizer import sanitize
     from planner.task_decomposer import decompose_task, DecompositionContext
     from workers.worker_pool import run_pool
+    from observability.transcript import Transcript, rotate_old
 
     config = _load_config(config_path)
 
@@ -761,12 +797,48 @@ async def _run_background_with_task(
     except Exception as e:
         logger.warning("Result store unavailable: %s", e)
 
+    # Open transcript and rotate old files
+    rotate_old()
+    worker_model = config.get("workers", {}).get("model", "unknown")
+    transcript = Transcript(run_id=run_id)
+    transcript.emit(
+        "task.start",
+        mode="background",
+        task=task_description,
+        task_type=task_type,
+        cwd=cwd,
+        model=worker_model,
+        subtask_count=len(plan.subtasks),
+    )
+
+    # Register transcript for claude.exec events
+    try:
+        from providers.claude_cli_backend import set_active_transcript
+        set_active_transcript(transcript)
+    except Exception:
+        pass
+
     pool_result = await run_pool(
         plan.subtasks, worker,
         max_parallel=max_parallel,
         result_store=result_store,
         run_id=run_id,
     )
+
+    # Deregister transcript
+    try:
+        from providers.claude_cli_backend import set_active_transcript
+        set_active_transcript(None)
+    except Exception:
+        pass
+
+    transcript.emit(
+        "task.done",
+        succeeded=pool_result.succeeded,
+        failed=pool_result.failed,
+        total=pool_result.total,
+    )
+    transcript.close()
 
     print(
         f"[background] Done: {pool_result.succeeded}/{pool_result.total} succeeded, "

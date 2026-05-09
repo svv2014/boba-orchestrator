@@ -28,6 +28,31 @@ from .base import (
 
 logger = logging.getLogger(__name__)
 
+# Module-level active transcript — set by orchestrator before dispatching workers.
+# Workers read this to emit exec events. Thread-safe: Transcript itself uses a lock.
+_active_transcript = None
+
+
+def set_active_transcript(transcript: "Any") -> None:
+    """Register a Transcript instance for the current run.
+
+    Called by orchestrator immediately after opening the transcript so that
+    ClaudeCliWorker can emit ``claude.exec.start`` / ``claude.exec.done`` events
+    without needing an explicit reference passed through every call chain.
+    """
+    global _active_transcript
+    _active_transcript = transcript
+
+
+def _emit(kind: str, **fields: "Any") -> None:
+    """Emit to the active transcript. Silently no-ops if none is set."""
+    try:
+        t = _active_transcript
+        if t is not None:
+            t.emit(kind, **fields)
+    except Exception:
+        pass
+
 DEFAULT_PLANNER_MODEL = "sonnet"
 DEFAULT_WORKER_MODEL = "sonnet"
 DEFAULT_TIMEOUT = 3600  # 60 min default — overridden by planner's estimate per subtask
@@ -275,6 +300,15 @@ class ClaudeCliWorker:
             elif self.session_id:
                 session_args = {"session_id": self.session_id, "resume": self.resume}
 
+            _emit(
+                "claude.exec.start",
+                task_id=task.id,
+                model=self.model,
+                timeout=timeout,
+                cwd=cwd,
+                description=task.description[:200],
+            )
+
             raw_output = await _run_claude(
                 prompt, self.model, timeout, cwd=cwd,
                 task_id=task.id, started_at=started_at,
@@ -295,6 +329,13 @@ class ClaudeCliWorker:
 
             duration = int((time.monotonic() - start) * 1000)
 
+            _emit(
+                "claude.exec.done",
+                task_id=task.id,
+                status="done",
+                duration_ms=duration,
+            )
+
             _write_progress(task.id, "done", description=task.description, started_at=started_at)
 
             return WorkerResult(
@@ -306,6 +347,13 @@ class ClaudeCliWorker:
 
         except asyncio.TimeoutError:
             duration = int((time.monotonic() - start) * 1000)
+            _emit(
+                "claude.exec.done",
+                task_id=task.id,
+                status="timeout",
+                duration_ms=duration,
+                error=f"Timeout after {timeout}s",
+            )
             _write_progress(task.id, "timeout", description=task.description, started_at=started_at)
             if acquired_session and sm:
                 sm.release_session(acquired_session)
@@ -319,6 +367,13 @@ class ClaudeCliWorker:
         except Exception as e:
             duration = int((time.monotonic() - start) * 1000)
             logger.error("Claude CLI worker failed for task %s: %s", task.id, e)
+            _emit(
+                "claude.exec.done",
+                task_id=task.id,
+                status="error",
+                duration_ms=duration,
+                error=str(e)[:500],
+            )
             _write_progress(task.id, "error", description=task.description, started_at=started_at)
             if acquired_session and sm:
                 sm.release_session(acquired_session)

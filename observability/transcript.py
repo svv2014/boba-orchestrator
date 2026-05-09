@@ -78,7 +78,7 @@ class Transcript:
         if self._file is None:
             return
         record = {
-            "ts": time.time(),
+            "ts": datetime.now(tz=timezone.utc).isoformat(),
             "run_id": self.run_id,
             "kind": kind,
             **fields,

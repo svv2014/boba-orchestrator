@@ -83,7 +83,7 @@ def test_emit_writes_valid_jsonl():
             assert "ts" in r
             assert "run_id" in r
             assert r["run_id"] == "jsonl-run"
-            assert isinstance(r["ts"], float)
+            assert isinstance(r["ts"], str)
 
 
 def test_emit_no_newline_inside_line():

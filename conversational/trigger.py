@@ -164,7 +164,7 @@ async def _run_worker_and_notify(
 
 def make_signal_notify_fn(
     recipient: str,
-    signal_url: str = "http://127.0.0.1:18080/api/v1/rpc",
+    signal_url: str = os.environ.get("SIGNAL_URL", "http://127.0.0.1:18080/api/v1/rpc"),
     account: str = os.environ.get("SIGNAL_ACCOUNT", ""),
 ) -> Callable[[str], "asyncio.Future[None]"]:
     """Build an async notify_fn that sends text via Signal JSON-RPC daemon."""
@@ -206,7 +206,7 @@ def make_signal_voice_notify_fn(
     recipient: str,
     tts_script: str,
     voice: str = "aiden",
-    signal_url: str = "http://127.0.0.1:18080/api/v1/rpc",
+    signal_url: str = os.environ.get("SIGNAL_URL", "http://127.0.0.1:18080/api/v1/rpc"),
 ) -> Callable[[str], "asyncio.Future[None]"]:
     """Build an async notify_fn that generates TTS and sends as voice note."""
     import json

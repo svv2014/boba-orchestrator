@@ -127,6 +127,15 @@ python orchestrator.py "refactor the auth module across all services"
 python orchestrator.py --dry-run
 ```
 
+## Examples
+
+Two self-contained examples let you evaluate the orchestrator end-to-end in about 5 minutes. No external data is fetched — everything needed is committed under `examples/`.
+
+- [`examples/01-research-task/`](examples/01-research-task/) — summarise three bundled AI papers (quick mode, read-only worker)
+- [`examples/02-code-task/`](examples/02-code-task/) — add a function + test to a tiny Python module (quick mode, file-editing worker)
+
+Each example's README contains the exact one-command invocation.
+
 ## Security
 
 Prompt injection defense is a core design concern, not an afterthought:

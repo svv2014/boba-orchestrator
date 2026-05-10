@@ -1,0 +1,20 @@
+planner:
+  provider: claude-cli
+  model: opus
+
+workers:
+  provider: claude-cli
+  model: sonnet
+  max_parallel: 1
+
+guardrails:
+  max_worker_timeout_seconds: 600
+  max_subtasks_per_plan: 3
+  max_parallel_workers: 1
+  max_tasks_per_run: 1
+  max_consecutive_failures: 1
+  max_total_worker_seconds: 1200
+
+projects:
+  - name: research-task
+    path: ..

@@ -108,7 +108,7 @@ class WorkerBackend(Protocol):
     Typically a fast/cheap model (Sonnet, GPT-4o, etc.).
     """
 
-    async def execute(self, task: SubTask) -> WorkerResult:
+    async def execute(self, task: SubTask, *, system_prefix: str = "") -> WorkerResult:
         """Execute a single subtask.
 
         Args:

@@ -376,7 +376,7 @@ class ClaudeCliWorker:
             # Track tokens and extract text from JSON
             output = raw_output
             if acquired_session and sm:
-                sm.track_usage(persona, raw_output)
+                sm.track_usage(persona or "", raw_output)
                 sm.release_session(acquired_session)
                 try:
                     parsed = json.loads(raw_output)
@@ -519,7 +519,7 @@ async def _run_claude(
         raise
 
     if proc.returncode != 0:
-        error_msg = _format_claude_error(proc.returncode, stdout, stderr)
+        error_msg = _format_claude_error(proc.returncode or -1, stdout, stderr)
 
         # Transient-failure retry: one attempt with a backoff before propagating.
         # Only applies to exit-1 (not timeouts, which are handled above).
@@ -580,7 +580,7 @@ async def _run_claude(
                 raise
             if fresh_proc.returncode == 0:
                 return stdout.decode("utf-8", errors="replace").strip()
-            error_msg = _format_claude_error(fresh_proc.returncode, stdout, stderr)
+            error_msg = _format_claude_error(fresh_proc.returncode or -1, stdout, stderr)
             raise RuntimeError(f"Claude CLI exited with code {fresh_proc.returncode}: {error_msg}")
 
         # Handle "session already in use" — retry with --continue instead of --resume

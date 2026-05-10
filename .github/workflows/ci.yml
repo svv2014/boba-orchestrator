@@ -12,13 +12,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version-file: pyproject.toml
       - name: Install dev deps
         run: |
           python -m pip install --upgrade pip setuptools wheel
           pip install -e ".[dev]"
       - name: ruff
         run: ruff check .
+      - name: pyright
+        run: pyright .
       - name: No personal identifiers
         run: |
           # Block personal paths and operator-specific identifiers from leaking
@@ -37,7 +39,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version-file: pyproject.toml
       - name: Install dev deps
         run: |
           python -m pip install --upgrade pip setuptools wheel

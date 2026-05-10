@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -53,6 +54,37 @@ def _emit(kind: str, **fields: "Any") -> None:
     except Exception:
         pass
 
+
+def _resolve_claude_bin() -> str:
+    """Resolve the Claude CLI binary path at call time.
+
+    Resolution order:
+      1. CLAUDE_CLI_PATH env var (primary)
+      2. CLAUDE_BIN env var (deprecated alias — logs a warning once)
+      3. shutil.which("claude")
+
+    Raises RuntimeError if none of the above resolves to a non-empty string.
+    """
+    path = os.environ.get("CLAUDE_CLI_PATH", "")
+    if path:
+        return path
+
+    legacy = os.environ.get("CLAUDE_BIN", "")
+    if legacy:
+        logger.warning(
+            "CLAUDE_BIN is deprecated; rename to CLAUDE_CLI_PATH. "
+            "Support will be removed in a future release."
+        )
+        return legacy
+
+    found = shutil.which("claude")
+    if found:
+        return found
+
+    raise RuntimeError(
+        "Claude CLI binary not found. "
+        "Set CLAUDE_CLI_PATH or install via https://docs.claude.com/claude-code"
+    )
 DEFAULT_PLANNER_MODEL = "sonnet"
 
 # Default backoff before retrying a transient failure (configurable via env var)
@@ -469,7 +501,7 @@ async def _run_claude(
     Returns:
         The text output from claude. If json_output=True, returns raw JSON string.
     """
-    claude_bin = os.environ.get("CLAUDE_BIN", "claude")
+    claude_bin = _resolve_claude_bin()
     # Use JSON output when we have a session (need token tracking)
     output_format = "json" if session_id else "text"
     cmd = [
@@ -549,7 +581,7 @@ async def _run_claude(
             # Retry failed — overwrite stdout/stderr/error_msg so the rest of the
             # error-handling path sees the final attempt's output.
             stdout, stderr = retry_stdout, retry_stderr
-            error_msg = _format_claude_error(retry_proc.returncode, stdout, stderr)
+            error_msg = _format_claude_error(retry_proc.returncode or 1, stdout, stderr)
             logger.error("Retry also failed. Propagating error: %s", error_msg[:200])
 
         # Handle "No conversation found" — session exists in state file but not in Claude's storage

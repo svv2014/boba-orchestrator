@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "boba-orchestrator"
-version = "0.1.0"
+version = "0.2.0"
 description = "Model-agnostic multi-agent orchestrator: a planner decomposes tasks, workers execute in parallel"
 readme = "README.md"
 license = "MIT"

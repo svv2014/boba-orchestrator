@@ -12,6 +12,7 @@ Each such release documents the breakage and a migration recipe.
 
 ### Changed
 - [BOB-10] Modernize Python tooling: 3.13 floor, single-source version, pyright, remove type-ignores (#14)
+- [BOB-3] Add examples/ directory with research and code tasks (#16)
 ## [0.1.0] - 2026-05-09
 
 Initial public release. The orchestrator has been running internally

@@ -9,6 +9,9 @@ Each such release documents the breakage and a migration recipe.
 
 ## [Unreleased]
 
+
+### Changed
+- [BOB-20] README: add Reliability section and CLAUDE_CLI_PATH resolution note (#21)
 ## [0.2.0] - 2026-05-10
 
 First post-launch batch. Substantial features and one critical fix.

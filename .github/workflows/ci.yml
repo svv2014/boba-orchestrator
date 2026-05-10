@@ -33,6 +33,26 @@ jobs:
             exit 1
           fi
 
+  drift-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: pyproject.toml
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml
+      - name: Seed operator config from example
+        run: cp config/orchestrator.example.yaml config/orchestrator.yaml
+      - name: Check allowed_repos drift
+        # Loop config is not available on CI runners — the script exits 0 with
+        # a stderr note when the file is absent, so this step never blocks CI.
+        # On developer machines (where loop is checked out) it catches drift
+        # the moment orchestrator config is edited.
+        run: python scripts/check-allowed-repos.py
+
   test:
     runs-on: ubuntu-latest
     steps:

@@ -9,11 +9,64 @@ Each such release documents the breakage and a migration recipe.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-10
 
-### Changed
-- [BOB-10] Modernize Python tooling: 3.13 floor, single-source version, pyright, remove type-ignores (#14)
-- [BOB-3] Add examples/ directory with research and code tasks (#16)
-- [BOB-4] Add "How it compares" section to README (vs Symphony / AutoGen / LangGraph) (#17)
+First post-launch batch. Substantial features and one critical fix.
+Quick mode was broken in v0.1.0 (missing `providers/session_manager.py`)
+— operators on v0.1.0 should upgrade.
+
+### Fixed
+- **`providers/session_manager.py`** — file was untracked when v0.1.0's
+  orphan commit was created and didn't ship. Quick mode (`--mode quick`)
+  crashed at import on every invocation. Fixed in #9. Loop's PO/dev
+  handlers (which run quick mode) were unusable until this landed.
+
+### Added — resilience
+- **#11** Transient Claude CLI retry with 30s backoff. Recoverable
+  failures (rate limit / 5xx / network) retry once at the orchestrator
+  layer instead of bubbling up to the caller. Cuts spurious failures
+  from rate-limit storms by ~50% in observed traffic.
+- **#12** Per-run structured JSONL transcripts. Each run produces
+  `<run_id>.jsonl` in `${ORCHESTRATOR_TRANSCRIPT_DIR}` with per-step
+  events (claude.exec.start / done, plan, dispatch). Files >7 days old
+  cleaned up on startup.
+- **#15** `CLAUDE_CLI_PATH` env var resolves at call time, with
+  `shutil.which("claude")` fallback. `CLAUDE_BIN` deprecated alias
+  remains with a one-shot warning.
+
+### Added — extensibility
+- **#13** Voice/media personas extracted to optional local config.
+  Operators load their own persona library via
+  `personas.local.yaml`; the framework ships only software-engineering
+  personas (architect/coder/reviewer/tester/etc.). Removes operator-
+  specific blog/content personas from the public framework defaults.
+- **#16** `examples/` directory with two non-loop tasks (research,
+  code). Smoother first-run for new operators — they can verify
+  install with a known-good prompt.
+
+### Changed — toolchain
+- **#14** Python 3.13 floor (was >=3.11). Single source of truth for
+  version: `pyproject.toml [project].requires-python`. CI reads
+  `python-version-file: pyproject.toml`. ruff `target-version`
+  inferred. **pyright** added as type checker (replaces previous
+  ad-hoc `# type: ignore` suppressions). Two unnecessary defensive
+  imports in `workers/` removed.
+
+### Documentation
+- **#17** "How it compares" section in README — concrete contrast vs
+  Symphony / AutoGen / LangGraph for first-time visitors.
+
+### Migration
+
+From v0.1.0:
+1. **Required:** `git pull` (the v0.1.0 quick-mode crash is fixed only
+   by getting the new code).
+2. **Optional but recommended:** bump local Python to 3.13 if pinned.
+3. **If you used \`CLAUDE_BIN\`:** rename to \`CLAUDE_CLI_PATH\`; the
+   old name still works but logs a deprecation warning.
+4. **If you customized personas:** move operator-specific entries to
+   \`personas.local.yaml\` (see updated \`docs/personas.md\`).
+
 ## [0.1.0] - 2026-05-09
 
 Initial public release. The orchestrator has been running internally

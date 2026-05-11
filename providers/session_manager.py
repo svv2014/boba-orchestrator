@@ -200,11 +200,22 @@ class SessionManager:
             )
             self.rotate_session(slot_key)
 
-    def track_usage(self, persona: str, claude_output: str) -> None:
-        """Parse token usage from claude -p JSON output and track it."""
+    def track_usage(
+        self,
+        persona: str,
+        claude_output: str,
+        session: Optional[SessionState] = None,
+    ) -> None:
+        """Parse token usage from claude -p JSON output and track it.
+
+        If ``session`` is provided, usage is recorded against that specific
+        SessionState (used by workers that acquired a parallel slot). Otherwise
+        we fall back to the persona's primary session.
+        """
         if not self.token_tracking:
             return
-        session = self.get_session(persona)
+        if session is None:
+            session = self.get_session(persona)
         if not session:
             return
 
@@ -233,8 +244,14 @@ class SessionManager:
 
         self._save_state()
 
-        # Check if rotation needed
-        if session.total_tokens >= self.max_tokens:
+        # Check if rotation needed (only rotate when this is the persona's
+        # primary session — slot sessions are short-lived and managed by
+        # acquire/release).
+        primary = self.get_session(persona)
+        if (
+            primary is session
+            and session.total_tokens >= self.max_tokens
+        ):
             logger.warning(
                 "Session %s (%s) at %d tokens — rotating",
                 persona,

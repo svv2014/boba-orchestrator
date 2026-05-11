@@ -423,13 +423,17 @@ async def _run_background(config_path: str, use_llm: bool = False) -> int:
     print("[background] Dispatching workers...")
     try:
         from workers.worker_pool import run_pool
+        from security.guardrails import GuardrailConfig
 
         raw_worker = get_worker(config)
         worker_model = config.get("workers", {}).get("model", "unknown")
         pool_worker = logged_worker(raw_worker, model=worker_model)
         max_parallel = config.get("workers", {}).get("max_parallel", 3)
+        bg_guardrails = GuardrailConfig.from_config(config)
 
-        pool_result = await run_pool(plan.subtasks, pool_worker, max_parallel=max_parallel)
+        pool_result = await run_pool(
+            plan.subtasks, pool_worker, max_parallel=max_parallel, guardrails=bg_guardrails
+        )
     except Exception as e:
         msg = f"Worker pool execution failed: {e}"
         await notify(msg, config)

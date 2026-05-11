@@ -3,10 +3,13 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 from security.guardrails import (
     GuardrailConfig,
     RunBudget,
     _resolve_worktree,
+    validate_command,
     validate_worker_timeout,
     validate_target_repo,
     validate_subtask_count,
@@ -274,3 +277,68 @@ def test_from_config_no_duplicates_in_union(tmp_path):
     }
     g = GuardrailConfig.from_config(config)
     assert g.allowed_repos.count(shared) == 1
+
+
+# --- validate_command ---
+
+
+def test_validate_command_blocked_pattern():
+    g = GuardrailConfig()
+    error = validate_command("please run rm -rf / on the server", g)
+    assert error is not None
+    assert "rm -rf /" in error
+
+
+def test_validate_command_clean_prompt():
+    g = GuardrailConfig()
+    assert validate_command("add a docstring to the utils module", g) is None
+
+
+def test_validate_command_case_insensitive():
+    g = GuardrailConfig()
+    # "DROP TABLE" is in blocked_commands; test with different casing
+    error = validate_command("run drop table users", g)
+    assert error is not None
+    error_upper = validate_command("RUN DROP TABLE USERS", g)
+    assert error_upper is not None
+
+
+def test_validate_command_empty_blocked_list():
+    g = GuardrailConfig(blocked_commands=[])
+    assert validate_command("rm -rf /", g) is None
+
+
+# --- Worker pool guardrail enforcement ---
+
+
+@pytest.mark.asyncio
+async def test_worker_pool_rejects_blocked_task():
+    """Blocked task should fail fast; the underlying worker must not be called."""
+    from providers.base import SubTask, TaskStatus, TaskType
+    from workers.worker_pool import WorkerPool
+
+    class SpyWorker:
+        def __init__(self):
+            self.call_count = 0
+
+        async def execute(self, task: SubTask, **kwargs) -> object:
+            self.call_count += 1
+            from providers.base import WorkerResult
+            return WorkerResult(task_id=task.id, status=TaskStatus.DONE)
+
+    spy = SpyWorker()
+    g = GuardrailConfig()  # default blocked_commands includes "rm -rf /"
+    pool = WorkerPool(spy, guardrails=g)
+
+    task = SubTask(
+        id="t1",
+        type=TaskType.CODE,
+        description="run rm -rf / to clean up",
+        target_repo="/tmp",
+    )
+    from workers.worker_pool import PoolResult
+    result: PoolResult = await pool.execute([task])
+
+    assert spy.call_count == 0, "Worker should not have been called for a blocked task"
+    assert result.results[0].status == TaskStatus.ERROR
+    assert "rm -rf /" in (result.results[0].error or "")

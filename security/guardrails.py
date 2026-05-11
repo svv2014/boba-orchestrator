@@ -175,3 +175,16 @@ def validate_subtask_count(count: int, guardrails: GuardrailConfig) -> Optional[
     if count > guardrails.max_subtasks_per_plan:
         return f"Plan has {count} subtasks (max: {guardrails.max_subtasks_per_plan})"
     return None
+
+
+def validate_command(text: str, guardrails: GuardrailConfig) -> Optional[str]:
+    """Check if text contains any blocked command pattern.
+
+    Case-insensitive substring match against guardrails.blocked_commands.
+    Returns an error string when a match is found, None otherwise.
+    """
+    lower = text.lower()
+    for pattern in guardrails.blocked_commands:
+        if pattern.lower() in lower:
+            return f"Blocked command pattern detected: '{pattern}'"
+    return None

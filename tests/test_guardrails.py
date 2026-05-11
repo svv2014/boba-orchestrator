@@ -2,7 +2,11 @@
 from __future__ import annotations
 
 import os
+from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
+from providers.base import SubTask, TaskStatus, TaskType
 from security.guardrails import (
     GuardrailConfig,
     RunBudget,
@@ -10,6 +14,7 @@ from security.guardrails import (
     validate_worker_timeout,
     validate_target_repo,
     validate_subtask_count,
+    validate_command,
 )
 
 
@@ -274,3 +279,93 @@ def test_from_config_no_duplicates_in_union(tmp_path):
     }
     g = GuardrailConfig.from_config(config)
     assert g.allowed_repos.count(shared) == 1
+
+
+# --- validate_command ---
+
+
+def test_validate_command_blocked_pattern():
+    g = GuardrailConfig()
+    error = validate_command("please run rm -rf / on the server", g)
+    assert error is not None
+    assert "rm -rf /" in error
+
+
+def test_validate_command_clean_prompt():
+    g = GuardrailConfig()
+    assert validate_command("add a unit test for the auth module", g) is None
+
+
+def test_validate_command_case_insensitive():
+    g = GuardrailConfig()
+    # "DROP TABLE" in uppercase is in the default list; test mixed case
+    error = validate_command("execute drop table users cascade", g)
+    assert error is not None
+
+
+def test_validate_command_custom_patterns():
+    g = GuardrailConfig(blocked_commands=["evil-cmd"])
+    assert validate_command("run evil-cmd --force", g) is not None
+    assert validate_command("run safe-cmd --force", g) is None
+
+
+def test_validate_command_empty_blocked_list():
+    g = GuardrailConfig(blocked_commands=[])
+    assert validate_command("rm -rf /", g) is None
+
+
+# --- WorkerPool blocked_commands enforcement ---
+
+
+@pytest.mark.asyncio
+async def test_worker_pool_rejects_blocked_task_without_subprocess():
+    """Worker pool must reject a task whose description matches a blocked pattern
+    and must not delegate to the underlying worker backend."""
+    from workers.worker_pool import WorkerPool
+
+    mock_worker = MagicMock()
+    mock_worker.execute = AsyncMock()
+
+    g = GuardrailConfig(blocked_commands=["rm -rf /"])
+    task = SubTask(
+        id="bad-task",
+        type=TaskType.CODE,
+        description="step 1: rm -rf / to clean up",
+        target_repo="/tmp",
+    )
+
+    pool = WorkerPool(mock_worker, guardrails=g)
+    result = await pool.execute([task])
+
+    assert result.total == 1
+    assert result.results[0].status == TaskStatus.ERROR
+    assert "rm -rf /" in result.results[0].error
+    mock_worker.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_worker_pool_allows_clean_task():
+    """A task with no blocked patterns should still be dispatched normally."""
+    from workers.worker_pool import WorkerPool
+    from providers.base import WorkerResult
+
+    async def _ok_execute(task, *, system_prefix=""):
+        return WorkerResult(task_id=task.id, status=TaskStatus.DONE)
+
+    mock_worker = MagicMock()
+    mock_worker.execute = AsyncMock(side_effect=_ok_execute)
+
+    g = GuardrailConfig(blocked_commands=["rm -rf /"])
+    task = SubTask(
+        id="good-task",
+        type=TaskType.CODE,
+        description="add unit tests for the parser module",
+        target_repo="/tmp",
+    )
+
+    pool = WorkerPool(mock_worker, guardrails=g)
+    result = await pool.execute([task])
+
+    assert result.total == 1
+    assert result.results[0].status == TaskStatus.DONE
+    mock_worker.execute.assert_called_once()

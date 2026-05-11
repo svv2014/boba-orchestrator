@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 
 from providers.base import SubTask, WorkerBackend, WorkerResult, TaskStatus
 from providers.persona_registry import get_persona_config
+from security.guardrails import GuardrailConfig, validate_command
 
 logger = logging.getLogger(__name__)
 
@@ -109,10 +110,12 @@ class WorkerPool:
         worker: WorkerBackend,
         max_parallel: int = 3,
         review_orchestrator=None,
+        guardrails: GuardrailConfig | None = None,
     ) -> None:
         self._worker = worker
         self._max_parallel = max_parallel
         self._review_orchestrator = review_orchestrator
+        self._guardrails = guardrails
 
     async def execute(self, tasks: list[SubTask]) -> PoolResult:
         """Execute all subtasks in parallel, respecting concurrency limit.
@@ -128,6 +131,16 @@ class WorkerPool:
         async def _run_one(task: SubTask) -> WorkerResult:
             async with semaphore:
                 try:
+                    if self._guardrails is not None:
+                        block_error = validate_command(task.description, self._guardrails)
+                        if block_error:
+                            logger.warning("Task %s blocked by guardrail: %s", task.id, block_error)
+                            return WorkerResult(
+                                task_id=task.id,
+                                status=TaskStatus.ERROR,
+                                error=block_error,
+                            )
+
                     persona = getattr(task, "persona", "coder") or "coder"
                     system_prefix = get_persona_config(persona).get("system_prefix", "")
                     result = await self._worker.execute(task, system_prefix=system_prefix)
@@ -172,6 +185,7 @@ async def run_pool(
     worker: WorkerBackend,
     max_parallel: int = 3,
     review_orchestrator=None,
+    guardrails: GuardrailConfig | None = None,
 ) -> PoolResult:
     """Convenience function to run a worker pool.
 
@@ -179,9 +193,16 @@ async def run_pool(
         tasks: SubTasks to execute.
         worker: WorkerBackend implementation.
         max_parallel: Max concurrent workers.
+        guardrails: Optional guardrail config; when set, task descriptions are
+            checked against blocked_commands before subprocess spawn.
 
     Returns:
         PoolResult with all worker results.
     """
-    pool = WorkerPool(worker, max_parallel=max_parallel, review_orchestrator=review_orchestrator)
+    pool = WorkerPool(
+        worker,
+        max_parallel=max_parallel,
+        review_orchestrator=review_orchestrator,
+        guardrails=guardrails,
+    )
     return await pool.execute(tasks)

@@ -25,10 +25,11 @@ guardrails:
   max_consecutive_failures: 3        # circuit breaker
   max_total_worker_seconds: 7200     # 2 hour total budget per run
 
-  # Optional explicit allowlist of paths workers may operate in.
-  # If empty, allowed_repos is auto-populated from `projects:` below.
-  # Add additional paths here if you dispatch workers in worktrees or
-  # ephemeral directories outside of the canonical project paths.
+  # Optional extra paths workers may operate in.
+  # The effective allowlist is always the union of this list and the paths
+  # under `projects:` below — adding entries here never removes project paths.
+  # Workers in git worktrees of an allowed repo are accepted automatically
+  # (the worktree is resolved to its canonical repo before the check).
   # allowed_repos:
   #   - /tmp/my-worktrees
 

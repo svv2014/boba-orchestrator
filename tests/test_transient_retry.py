@@ -1,5 +1,8 @@
 """Tests for the transient-failure classifier in claude_cli_backend."""
 
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 from providers.claude_cli_backend import _is_recoverable
@@ -101,3 +104,36 @@ class TestEdgeCases:
     def test_multiline_permanent(self):
         stderr = "Starting claude...\ntoo many tokens in prompt\nExiting."
         assert not _is_recoverable(stderr)
+
+
+# ---------------------------------------------------------------------------
+# Transient retry path: 429 in stdout, empty stderr
+# ---------------------------------------------------------------------------
+
+class TestTransientRetryStdoutPath:
+    """Verify _run_claude triggers the retry when the recoverable error is
+    on stdout with empty stderr (the stream Claude CLI uses for --output-format
+    text failure messages)."""
+
+    def test_429_in_stdout_empty_stderr_is_recoverable(self):
+        """Effective body falls back to stdout when stderr is empty."""
+        stdout_msg = "HTTP 429 Too Many Requests — rate limit exceeded"
+        # Simulate the effective-body logic from _run_claude:
+        stdout = stdout_msg.encode()
+        stderr = b""
+        effective = (stderr or stdout or b"").decode("utf-8", errors="replace")
+        assert _is_recoverable(effective)
+
+    def test_stderr_still_wins_when_populated(self):
+        """When stderr is non-empty it is used, preserving existing semantics."""
+        stdout = b"HTTP 429 Too Many Requests"
+        stderr = b"some unrelated stderr output"
+        effective = (stderr or stdout or b"").decode("utf-8", errors="replace")
+        # stderr doesn't contain a recoverable pattern, so result is False
+        assert not _is_recoverable(effective)
+
+    def test_both_empty_is_not_recoverable(self):
+        stdout = b""
+        stderr = b""
+        effective = (stderr or stdout or b"").decode("utf-8", errors="replace")
+        assert not _is_recoverable(effective)

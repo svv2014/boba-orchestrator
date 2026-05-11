@@ -565,7 +565,8 @@ async def _run_claude(
 
         # Transient-failure retry: one attempt with a backoff before propagating.
         # Only applies to exit-1 (not timeouts, which are handled above).
-        if proc.returncode == 1 and _is_recoverable(stderr.decode("utf-8", errors="replace") if stderr else ""):
+        effective = (stderr or stdout or b"").decode("utf-8", errors="replace")
+        if proc.returncode == 1 and _is_recoverable(effective):
             delay = int(os.environ.get("CLAUDE_RETRY_DELAY_SECONDS", _DEFAULT_RETRY_DELAY))
             logger.warning(
                 "Transient claude failure detected (exit 1). Retrying in %ds. Error: %s",

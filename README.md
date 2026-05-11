@@ -169,6 +169,14 @@ Prompt injection defense is a core design concern, not an afterthought:
   with structured per-step events. Files >7 days old auto-deleted on startup.
 - **Circuit breaker.** Worker pool aborts after `max_consecutive_failures`
   (default 3). Configured under `guardrails:` in your config.
+- **Fresh claude session per invocation.** Quick-mode calls pass a freshly
+  generated `--session-id` to the Claude CLI so it does not silently
+  auto-resume the cwd-bound session file at
+  `~/.claude/projects/<encoded-cwd>/<uuid>.jsonl`. Without this, those files
+  grow across runs and eventually trip `"Prompt is too long"` locally.
+- **Session-log GC.** Run `scripts/gc-claude-sessions.py` (idempotent) to
+  archive jsonl files older than 7 days or larger than 10 MB to
+  `~/.claude/_archived/`. Use `--dry-run` to preview. Recommended weekly.
 
 ## Stack
 

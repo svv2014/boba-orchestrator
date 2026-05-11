@@ -54,6 +54,27 @@ python orchestrator.py --mode background
 python orchestrator.py --dry-run
 ```
 
+## Maintenance: claude session log GC
+
+`claude -p` stores per-cwd session jsonl files at
+`~/.claude/projects/<encoded-cwd>/<uuid>.jsonl`. Even though the orchestrator
+now passes a fresh `--session-id` on every quick-mode invocation (issue #25),
+these files accumulate over time and have been observed at 30–46 MB on
+long-lived projects.
+
+Archive bloated logs periodically — safe to run, never deletes:
+
+```bash
+# Preview what would be archived (older than 7d OR larger than 10 MB)
+scripts/gc-claude-sessions.py --dry-run
+
+# Actually move them to ~/.claude/_archived/
+scripts/gc-claude-sessions.py
+```
+
+Tunables: `--max-age-days`, `--max-size-mb`, `--sessions-root`,
+`--archive-root`. A weekly cron is a reasonable default.
+
 ## Code style
 
 - Type hints on public APIs (we ship `py.typed` via `pyproject.toml`)

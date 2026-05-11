@@ -16,6 +16,7 @@ import logging
 import os
 import shutil
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -408,7 +409,7 @@ class ClaudeCliWorker:
             # Track tokens and extract text from JSON
             output = raw_output
             if acquired_session and sm:
-                sm.track_usage(persona or "", raw_output)
+                sm.track_usage(persona or "", raw_output, session=acquired_session)
                 sm.release_session(acquired_session)
                 try:
                     parsed = json.loads(raw_output)
@@ -502,7 +503,10 @@ async def _run_claude(
         The text output from claude. If json_output=True, returns raw JSON string.
     """
     claude_bin = _resolve_claude_bin()
-    # Use JSON output when we have a session (need token tracking)
+    # Use JSON output when caller supplied an explicit session (need token tracking).
+    # When session_id is None we still pass a fresh --session-id below to prevent
+    # claude CLI from silently auto-resuming the cwd-bound session jsonl, but keep
+    # the output format as text so callers like the planner get a plain response.
     output_format = "json" if session_id else "text"
     cmd = [
         claude_bin, "-p",
@@ -524,6 +528,12 @@ async def _run_claude(
         else:
             # Start fresh but name the session with a specific ID
             cmd.extend(["--session-id", session_id])
+    else:
+        # No explicit session: generate a fresh UUID for this invocation so claude CLI
+        # does NOT auto-resume the most recent cwd-bound session jsonl (issue #25).
+        # That auto-resume is what allowed those jsonl files to grow to 4-46 MB and
+        # eventually trip "Prompt is too long" rejections.
+        cmd.extend(["--session-id", str(uuid.uuid4())])
 
     cmd.append(prompt)
 

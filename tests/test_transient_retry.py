@@ -152,3 +152,34 @@ class TestRunClaudeRetryOnStdout:
 
         assert call_count == 2, "Expected two subprocess calls: initial + retry"
         assert result == "ok result"
+
+    @pytest.mark.asyncio
+    async def test_no_retry_on_permanent_error_in_stdout(self, monkeypatch):
+        """Permanent error in stdout with empty stderr must NOT trigger retry (one subprocess call)."""
+        monkeypatch.setenv("CLAUDE_RETRY_DELAY_SECONDS", "0")
+        monkeypatch.setenv("CLAUDE_CLI_PATH", "/fake/claude")
+
+        call_count = 0
+
+        def fake_proc(returncode, stdout_bytes, stderr_bytes):
+            proc = MagicMock()
+            proc.returncode = returncode
+            proc.pid = 12345
+            proc.communicate = AsyncMock(return_value=(stdout_bytes, stderr_bytes))
+            proc.kill = MagicMock()
+            return proc
+
+        only_proc = fake_proc(1, b"too many tokens in the prompt", b"")
+
+        async def mock_create_subprocess(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return only_proc
+
+        monkeypatch.setattr("asyncio.create_subprocess_exec", mock_create_subprocess)
+
+        from providers.claude_cli_backend import _run_claude
+        with pytest.raises(Exception):
+            await _run_claude("hello")
+
+        assert call_count == 1, "Permanent error must not trigger a retry subprocess call"

@@ -151,3 +151,25 @@ def test_multiple_missing_all_reported(tmp_path):
     assert result.returncode != 0
     for r in loop_roots:
         assert r in result.stdout
+
+
+# (d) Union semantics: explicit allowed_repos plus projects are merged, not replaced.
+def test_union_explicit_plus_projects_no_drift(tmp_path):
+    proj_root = tmp_path / "my-project"
+    extra_root = tmp_path / "extra-path"
+    loop_root = tmp_path / "my-project"  # loop wants the project path
+
+    def _orch_union(proj_path: str, extra_path: str) -> str:
+        return (
+            f"guardrails:\n  allowed_repos:\n    - {extra_path}\n"
+            f"projects:\n  - name: p\n    path: {proj_path}\n"
+        )
+
+    result = run_check(
+        tmp_path,
+        orchestrator_yaml=_orch_union(str(proj_root), str(extra_root)),
+        loop_yaml=_loop_yaml([str(loop_root)]),
+    )
+    # project path must still be in effective set even though explicit list is non-empty
+    assert result.returncode == 0
+    assert "MISSING" not in result.stdout

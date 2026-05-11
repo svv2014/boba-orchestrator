@@ -23,27 +23,30 @@ def _resolve(p: str) -> str:
 
 
 def effective_allowed_repos(config_path: str) -> set[str]:
-    """Return the effective allowed_repos set from orchestrator config."""
+    """Return the effective allowed_repos set from orchestrator config.
+
+    The result is the union of guardrails.allowed_repos (if any) and
+    projects[*].path (always). This mirrors the runtime union semantics in
+    GuardrailConfig.from_config so the drift check stays consistent.
+    """
     config = _load_yaml(config_path)
     if not isinstance(config, dict):
         return set()
 
     guardrails = config.get("guardrails", {}) or {}
-    explicit: list[str] | None = guardrails.get("allowed_repos") or None
-
-    if explicit:
-        return {_resolve(p) for p in explicit}
+    explicit: list[str] = list(guardrails.get("allowed_repos") or [])
 
     # Derive from projects[*].path (resolved relative to config file's directory)
     config_dir = os.path.dirname(os.path.abspath(config_path))
-    repos: set[str] = set()
+    derived: list[str] = []
     for project in config.get("projects", []) or []:
         path = (project or {}).get("path")
         if path:
             if not os.path.isabs(path):
                 path = os.path.join(config_dir, path)
-            repos.add(_resolve(path))
-    return repos
+            derived.append(_resolve(path))
+
+    return {_resolve(p) for p in explicit} | set(derived)
 
 
 def loop_roots(loop_config_path: str) -> list[str]:

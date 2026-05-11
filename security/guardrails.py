@@ -45,10 +45,18 @@ class GuardrailConfig:
         g = config.get("guardrails", {})
         projects = config.get("projects", [])
 
-        # Auto-populate allowed_repos from configured projects
-        allowed = g.get("allowed_repos", [])
-        if not allowed and projects:
-            allowed = [p.get("path", "") for p in projects if p.get("path")]
+        # Build effective allowed_repos as the union of explicit config entries and
+        # project paths. Previously explicit entries replaced project-derived paths;
+        # now both sources are merged so adding an extra path doesn't silently drop
+        # the primary project list. Order: explicit first, then projects-derived.
+        explicit = list(g.get("allowed_repos") or [])
+        derived = [p.get("path", "") for p in projects if p.get("path")]
+        seen: set[str] = set()
+        allowed: list[str] = []
+        for p in explicit + derived:
+            if p and p not in seen:
+                seen.add(p)
+                allowed.append(p)
 
         return cls(
             max_worker_timeout_seconds=g.get("max_worker_timeout_seconds", 1800),
@@ -118,6 +126,27 @@ def validate_worker_timeout(requested: int, guardrails: GuardrailConfig) -> int:
     return min(requested, guardrails.max_worker_timeout_seconds)
 
 
+def _resolve_worktree(repo_path: str) -> str:
+    """If repo_path is a git worktree, return the canonical repo path; else return repo_path."""
+    git_marker = os.path.join(repo_path, ".git")
+    if not os.path.isfile(git_marker):
+        return repo_path
+    try:
+        with open(git_marker) as fh:
+            first_line = fh.readline().strip()
+    except OSError:
+        return repo_path
+    if not first_line.startswith("gitdir: "):
+        return repo_path
+    gitdir = first_line[len("gitdir: "):]
+    # Expected: <canonical>/.git/worktrees/<name>
+    marker = os.sep + ".git" + os.sep + "worktrees" + os.sep
+    if marker not in gitdir:
+        return repo_path
+    canonical = gitdir.split(marker, 1)[0]
+    return canonical
+
+
 def validate_target_repo(repo_path: str, guardrails: GuardrailConfig) -> Optional[str]:
     """Validate that the target repo is in the allowed list.
 
@@ -126,12 +155,18 @@ def validate_target_repo(repo_path: str, guardrails: GuardrailConfig) -> Optiona
     if not guardrails.allowed_repos:
         return None  # no allowlist = no restriction
 
-    abs_repo = os.path.abspath(repo_path)
+    resolved = _resolve_worktree(repo_path)
+    abs_repo = os.path.abspath(resolved)
     for allowed in guardrails.allowed_repos:
         abs_allowed = os.path.abspath(allowed)
         if abs_repo == abs_allowed or abs_repo.startswith(abs_allowed + os.sep):
             return None
 
+    if resolved != repo_path:
+        return (
+            f"Target repo '{repo_path}' (resolved to '{resolved}') "
+            f"is not in allowed_repos: {guardrails.allowed_repos}"
+        )
     return f"Target repo '{repo_path}' is not in allowed_repos: {guardrails.allowed_repos}"
 
 

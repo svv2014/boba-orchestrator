@@ -1,9 +1,12 @@
 """Tests for runtime guardrails."""
 from __future__ import annotations
 
+import os
+
 from security.guardrails import (
     GuardrailConfig,
     RunBudget,
+    _resolve_worktree,
     validate_worker_timeout,
     validate_target_repo,
     validate_subtask_count,
@@ -150,3 +153,124 @@ def test_validate_subtask_count():
     error = validate_subtask_count(5, g)
     assert error is not None
     assert "max" in error.lower()
+
+
+# --- Worktree resolution ---
+
+
+def _make_worktree_git_file(worktree_dir, canonical_repo: str, wt_name: str = "wt") -> None:
+    """Fabricate a .git file as git-worktree produces."""
+    gitdir = os.path.join(canonical_repo, ".git", "worktrees", wt_name)
+    (worktree_dir / ".git").write_text(f"gitdir: {gitdir}\n")
+
+
+def test_resolve_worktree_returns_canonical(tmp_path):
+    canonical = tmp_path / "canonical-repo"
+    canonical.mkdir()
+    worktree = tmp_path / "loop-rework-wt-1"
+    worktree.mkdir()
+    _make_worktree_git_file(worktree, str(canonical))
+    assert _resolve_worktree(str(worktree)) == str(canonical)
+
+
+def test_resolve_worktree_standard_repo_unchanged(tmp_path):
+    repo = tmp_path / "my-repo"
+    repo.mkdir()
+    git_dir = repo / ".git"
+    git_dir.mkdir()  # standard repo: .git is a directory
+    assert _resolve_worktree(str(repo)) == str(repo)
+
+
+def test_resolve_worktree_no_git_unchanged(tmp_path):
+    plain = tmp_path / "not-a-repo"
+    plain.mkdir()
+    assert _resolve_worktree(str(plain)) == str(plain)
+
+
+def test_resolve_worktree_gitdir_without_worktrees_marker(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    # .git file without the /worktrees/ marker — not a standard worktree
+    (repo / ".git").write_text("gitdir: /some/other/path/.git\n")
+    assert _resolve_worktree(str(repo)) == str(repo)
+
+
+# --- validate_target_repo with worktree resolution ---
+
+
+def test_worktree_of_allowed_repo_accepted(tmp_path):
+    canonical = tmp_path / "canonical-repo"
+    canonical.mkdir()
+    worktree = tmp_path / "loop-rework-slug-1"
+    worktree.mkdir()
+    _make_worktree_git_file(worktree, str(canonical))
+
+    g = GuardrailConfig(allowed_repos=[str(canonical)])
+    assert validate_target_repo(str(worktree), g) is None
+
+
+def test_worktree_of_unallowed_repo_rejected(tmp_path):
+    canonical = tmp_path / "unallowed-repo"
+    canonical.mkdir()
+    allowed = tmp_path / "allowed-repo"
+    allowed.mkdir()
+    worktree = tmp_path / "loop-rework-slug-2"
+    worktree.mkdir()
+    _make_worktree_git_file(worktree, str(canonical))
+
+    g = GuardrailConfig(allowed_repos=[str(allowed)])
+    error = validate_target_repo(str(worktree), g)
+    assert error is not None
+    assert "not in allowed_repos" in error
+
+
+def test_random_tmp_path_without_git_file_rejected(tmp_path):
+    random_dir = tmp_path / "tmp" / "anything-else"
+    random_dir.mkdir(parents=True)
+    g = GuardrailConfig(allowed_repos=[str(tmp_path / "some-allowed-repo")])
+    error = validate_target_repo(str(random_dir), g)
+    assert error is not None
+    assert "not in allowed_repos" in error
+
+
+# --- from_config union semantics ---
+
+
+def test_from_config_explicit_plus_projects_produces_union(tmp_path):
+    extra = str(tmp_path / "extra-path")
+    proj_a = str(tmp_path / "proj-a")
+    proj_b = str(tmp_path / "proj-b")
+    config = {
+        "guardrails": {"allowed_repos": [extra]},
+        "projects": [
+            {"name": "a", "path": proj_a},
+            {"name": "b", "path": proj_b},
+        ],
+    }
+    g = GuardrailConfig.from_config(config)
+    assert extra in g.allowed_repos
+    assert proj_a in g.allowed_repos
+    assert proj_b in g.allowed_repos
+
+
+def test_from_config_explicit_does_not_override_projects(tmp_path):
+    extra = str(tmp_path / "extra")
+    proj = str(tmp_path / "proj")
+    config = {
+        "guardrails": {"allowed_repos": [extra]},
+        "projects": [{"name": "p", "path": proj}],
+    }
+    g = GuardrailConfig.from_config(config)
+    # Both must appear — explicit must not suppress project paths
+    assert extra in g.allowed_repos
+    assert proj in g.allowed_repos
+
+
+def test_from_config_no_duplicates_in_union(tmp_path):
+    shared = str(tmp_path / "shared")
+    config = {
+        "guardrails": {"allowed_repos": [shared]},
+        "projects": [{"name": "p", "path": shared}],
+    }
+    g = GuardrailConfig.from_config(config)
+    assert g.allowed_repos.count(shared) == 1

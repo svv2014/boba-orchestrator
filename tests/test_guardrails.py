@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 import os
+from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from security.guardrails import (
     GuardrailConfig,
     RunBudget,
     _resolve_worktree,
+    validate_command,
     validate_worker_timeout,
     validate_target_repo,
     validate_subtask_count,
@@ -274,3 +278,94 @@ def test_from_config_no_duplicates_in_union(tmp_path):
     }
     g = GuardrailConfig.from_config(config)
     assert g.allowed_repos.count(shared) == 1
+
+
+# --- validate_command ---
+
+
+def test_validate_command_blocked_pattern():
+    g = GuardrailConfig()
+    error = validate_command("please run rm -rf / on the server", g)
+    assert error is not None
+    assert "rm -rf /" in error
+
+
+def test_validate_command_clean_prompt():
+    g = GuardrailConfig()
+    assert validate_command("add a unit test for the parser module", g) is None
+
+
+def test_validate_command_case_insensitive():
+    g = GuardrailConfig()
+    # "DROP TABLE" is in the default list; test uppercase and mixed-case variants
+    assert validate_command("please DROP TABLE users cascade", g) is not None
+    assert validate_command("please drop table users cascade", g) is not None
+    assert validate_command("please Drop Table users cascade", g) is not None
+
+
+def test_validate_command_custom_blocked_list():
+    g = GuardrailConfig(blocked_commands=["forbidden_op"])
+    assert validate_command("run forbidden_op now", g) is not None
+    assert validate_command("run other_op now", g) is None
+
+
+def test_validate_command_empty_blocked_list():
+    g = GuardrailConfig(blocked_commands=[])
+    assert validate_command("rm -rf /", g) is None
+
+
+# --- worker dispatch rejects blocked tasks ---
+
+
+@pytest.mark.asyncio
+async def test_worker_pool_rejects_blocked_task():
+    """Worker pool must reject a blocked task without spawning a subprocess."""
+    from providers.base import SubTask, TaskStatus, TaskType, WorkerResult
+    from workers.worker_pool import WorkerPool
+
+    mock_backend = AsyncMock()
+    mock_backend.execute = AsyncMock(
+        return_value=WorkerResult(task_id="t1", status=TaskStatus.DONE)
+    )
+
+    g = GuardrailConfig()
+    pool = WorkerPool(mock_backend, guardrails=g)
+
+    task = SubTask(
+        id="t1",
+        type=TaskType.CODE,
+        description="Remove everything: rm -rf /",
+        target_repo="/tmp/repo",
+    )
+
+    result = await pool.execute([task])
+
+    assert result.results[0].status == TaskStatus.ERROR
+    assert "rm -rf /" in (result.results[0].error or "")
+    mock_backend.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_worker_pool_allows_clean_task():
+    """Worker pool must pass through tasks with no blocked patterns."""
+    from providers.base import SubTask, TaskStatus, TaskType, WorkerResult
+    from workers.worker_pool import WorkerPool
+
+    expected = WorkerResult(task_id="t2", status=TaskStatus.DONE)
+    mock_backend = AsyncMock()
+    mock_backend.execute = AsyncMock(return_value=expected)
+
+    g = GuardrailConfig()
+    pool = WorkerPool(mock_backend, guardrails=g)
+
+    task = SubTask(
+        id="t2",
+        type=TaskType.CODE,
+        description="Refactor the authentication module",
+        target_repo="/tmp/repo",
+    )
+
+    result = await pool.execute([task])
+
+    assert result.results[0].status == TaskStatus.DONE
+    mock_backend.execute.assert_called_once()

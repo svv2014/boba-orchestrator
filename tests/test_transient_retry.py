@@ -1,7 +1,13 @@
 """Tests for the transient-failure classifier in claude_cli_backend."""
 
+from __future__ import annotations
+
+import asyncio
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
+from providers import claude_cli_backend
 from providers.claude_cli_backend import _is_recoverable
 
 
@@ -101,3 +107,55 @@ class TestEdgeCases:
     def test_multiline_permanent(self):
         stderr = "Starting claude...\ntoo many tokens in prompt\nExiting."
         assert not _is_recoverable(stderr)
+
+
+# ---------------------------------------------------------------------------
+# Integration: _run_claude retry path with 429 in stdout, empty stderr
+# ---------------------------------------------------------------------------
+
+class _FakeProc:
+    def __init__(self, stdout: bytes, stderr: bytes, returncode: int):
+        self._stdout = stdout
+        self._stderr = stderr
+        self.returncode = returncode
+        self.pid = 99999
+
+    async def communicate(self):
+        return self._stdout, self._stderr
+
+
+class TestRunClaudeStdoutRetry:
+    """Verify that _run_claude triggers the transient retry when a recoverable
+    error (e.g. 429) appears only on stdout with an empty stderr stream."""
+
+    def test_429_in_stdout_empty_stderr_triggers_retry(self, monkeypatch):
+        monkeypatch.setenv("CLAUDE_CLI_PATH", "/fake/claude")
+        # Zero out the retry delay so the test does not actually wait 30 s.
+        monkeypatch.setenv("CLAUDE_RETRY_DELAY_SECONDS", "0")
+
+        call_count = 0
+
+        async def fake_exec(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # First attempt: 429 on stdout, stderr empty — the bug scenario.
+                return _FakeProc(
+                    stdout=b"HTTP 429 Too Many Requests",
+                    stderr=b"",
+                    returncode=1,
+                )
+            # Second attempt (the retry): success.
+            return _FakeProc(stdout=b"ok", stderr=b"", returncode=0)
+
+        with patch.object(
+            claude_cli_backend.asyncio,
+            "create_subprocess_exec",
+            new=AsyncMock(side_effect=fake_exec),
+        ):
+            asyncio.run(claude_cli_backend._run_claude("hello"))
+
+        assert call_count == 2, (
+            "Expected exactly 2 subprocess calls (initial + retry), "
+            f"got {call_count}. Retry was not triggered."
+        )

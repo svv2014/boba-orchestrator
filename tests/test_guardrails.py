@@ -10,6 +10,7 @@ from security.guardrails import (
     validate_worker_timeout,
     validate_target_repo,
     validate_subtask_count,
+    validate_command,
 )
 
 
@@ -274,3 +275,94 @@ def test_from_config_no_duplicates_in_union(tmp_path):
     }
     g = GuardrailConfig.from_config(config)
     assert g.allowed_repos.count(shared) == 1
+
+
+# --- validate_command ---
+
+
+def test_validate_command_blocked_pattern():
+    g = GuardrailConfig()
+    error = validate_command("please run rm -rf / on the server", g)
+    assert error is not None
+    assert "rm -rf /" in error
+
+
+def test_validate_command_clean_prompt():
+    g = GuardrailConfig()
+    assert validate_command("add a unit test for the parse function", g) is None
+
+
+def test_validate_command_case_insensitive():
+    g = GuardrailConfig()
+    # "DROP TABLE" in mixed case
+    error = validate_command("execute Drop Table users", g)
+    assert error is not None
+
+
+def test_validate_command_empty_blocked_list():
+    g = GuardrailConfig(blocked_commands=[])
+    assert validate_command("rm -rf /", g) is None
+
+
+def test_validate_command_custom_pattern():
+    g = GuardrailConfig(blocked_commands=["danger_cmd"])
+    assert validate_command("safe operation", g) is None
+    assert validate_command("call danger_cmd now", g) is not None
+
+
+# --- worker pool blocked-command dispatch tests ---
+
+
+def test_worker_pool_blocks_task_without_spawning():
+    """WorkerPool rejects a blocked task without calling the backend execute."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+    from providers.base import SubTask, TaskType, TaskStatus
+    from workers.worker_pool import WorkerPool
+
+    mock_backend = MagicMock()
+    mock_backend.execute = AsyncMock()
+
+    guardrails = GuardrailConfig(blocked_commands=["rm -rf /"])
+    pool = WorkerPool(mock_backend, guardrails=guardrails)
+
+    task = SubTask(
+        id="t1",
+        type=TaskType.CODE,
+        description="run rm -rf / to clean up",
+        target_repo="/tmp/repo",
+    )
+
+    result = asyncio.run(pool.execute([task]))
+
+    mock_backend.execute.assert_not_called()
+    assert result.results[0].status == TaskStatus.ERROR
+    assert "rm -rf /" in result.results[0].error
+
+
+def test_worker_pool_allows_clean_task():
+    """WorkerPool passes a clean task through to the backend."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+    from providers.base import SubTask, TaskType, TaskStatus, WorkerResult
+    from workers.worker_pool import WorkerPool
+
+    mock_backend = MagicMock()
+    mock_backend.execute = AsyncMock(return_value=WorkerResult(
+        task_id="t2", status=TaskStatus.DONE
+    ))
+
+    guardrails = GuardrailConfig()
+    pool = WorkerPool(mock_backend, guardrails=guardrails)
+
+    task = SubTask(
+        id="t2",
+        type=TaskType.CODE,
+        description="add a docstring to the parse function",
+        target_repo="/tmp/repo",
+    )
+
+    result = asyncio.run(pool.execute([task]))
+
+    mock_backend.execute.assert_called_once()
+    assert result.results[0].status == TaskStatus.DONE

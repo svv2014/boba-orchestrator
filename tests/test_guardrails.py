@@ -7,6 +7,7 @@ from security.guardrails import (
     GuardrailConfig,
     RunBudget,
     _resolve_worktree,
+    validate_command,
     validate_worker_timeout,
     validate_target_repo,
     validate_subtask_count,
@@ -274,3 +275,69 @@ def test_from_config_no_duplicates_in_union(tmp_path):
     }
     g = GuardrailConfig.from_config(config)
     assert g.allowed_repos.count(shared) == 1
+
+
+# --- validate_command ---
+
+
+def test_validate_command_blocks_matching_pattern():
+    g = GuardrailConfig()
+    error = validate_command("please run rm -rf / now", g)
+    assert error is not None
+    assert "rm -rf /" in error
+
+
+def test_validate_command_passes_clean_prompt():
+    g = GuardrailConfig()
+    assert validate_command("add a docstring to the parse function", g) is None
+
+
+def test_validate_command_case_insensitive():
+    g = GuardrailConfig()
+    # "DROP TABLE" is in blocked_commands; test upper and mixed variants
+    assert validate_command("drop table users", g) is not None
+    assert validate_command("DROP TABLE users", g) is not None
+    assert validate_command("Drop Table users", g) is not None
+
+
+def test_validate_command_empty_blocked_list_always_passes():
+    g = GuardrailConfig(blocked_commands=[])
+    assert validate_command("rm -rf /", g) is None
+
+
+def test_validate_command_custom_pattern():
+    g = GuardrailConfig(blocked_commands=["secret-op"])
+    assert validate_command("run secret-op now", g) is not None
+    assert validate_command("run other-op now", g) is None
+
+
+# --- worker pool dispatch rejects blocked task ---
+
+
+def test_worker_pool_rejects_blocked_task_without_spawn():
+    """WorkerPool must fail fast on a blocked task description; no subprocess spawned."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+    from providers.base import SubTask, TaskType, TaskStatus
+    from workers.worker_pool import WorkerPool
+
+    mock_worker = MagicMock()
+    mock_worker.execute = AsyncMock()
+
+    g = GuardrailConfig(blocked_commands=["rm -rf /"])
+    pool = WorkerPool(mock_worker, guardrails=g)
+
+    task = SubTask(
+        id="t1",
+        type=TaskType.CODE,
+        description="please run rm -rf / to clean up",
+        target_repo="/tmp/repo",
+    )
+
+    result = asyncio.run(pool.execute([task]))
+
+    assert len(result.results) == 1
+    assert result.results[0].status == TaskStatus.ERROR
+    assert result.results[0].error is not None
+    assert "rm -rf /" in result.results[0].error
+    mock_worker.execute.assert_not_called()

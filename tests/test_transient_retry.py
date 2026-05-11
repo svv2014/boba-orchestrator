@@ -1,5 +1,8 @@
 """Tests for the transient-failure classifier in claude_cli_backend."""
 
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 from providers.claude_cli_backend import _is_recoverable
@@ -101,3 +104,85 @@ class TestEdgeCases:
     def test_multiline_permanent(self):
         stderr = "Starting claude...\ntoo many tokens in prompt\nExiting."
         assert not _is_recoverable(stderr)
+
+
+# ---------------------------------------------------------------------------
+# Transient retry: stdout-only error path (issue #28)
+# ---------------------------------------------------------------------------
+
+class TestTransientRetryStdoutPath:
+    """Verify that _run_claude triggers the transient retry when a 429/rate-limit
+    message appears only in stdout with empty stderr."""
+
+    def test_429_in_stdout_empty_stderr_is_recoverable(self):
+        """Effective error body falls back to stdout when stderr is empty."""
+        stdout_body = "HTTP 429 Too Many Requests"
+        # Mirror the effective = (stderr or stdout or b"") logic from _run_claude
+        stderr = b""
+        stdout = stdout_body.encode()
+        effective = (stderr or stdout or b"").decode("utf-8", errors="replace")
+        assert _is_recoverable(effective)
+
+    def test_stderr_wins_when_populated(self):
+        """When stderr is non-empty it still takes priority over stdout."""
+        stderr = b"Internal server error (500)"
+        stdout = b"some partial output"
+        effective = (stderr or stdout or b"").decode("utf-8", errors="replace")
+        assert _is_recoverable(effective)
+
+    def test_permanent_error_in_stdout_not_retried(self):
+        """A non-recoverable error in stdout is still classified permanent."""
+        stderr = b""
+        stdout = b"SyntaxError: unexpected token in agent code"
+        effective = (stderr or stdout or b"").decode("utf-8", errors="replace")
+        assert not _is_recoverable(effective)
+
+    @pytest.mark.asyncio
+    async def test_run_claude_retries_on_429_in_stdout(self):
+        """_run_claude must attempt a retry when 429 appears only on stdout."""
+        rate_limit_msg = b"HTTP 429 Too Many Requests"
+
+        # First process: exit 1, stdout=429, stderr empty
+        first_proc = MagicMock()
+        first_proc.returncode = 1
+        first_proc.pid = 1234
+        first_proc.communicate = AsyncMock(return_value=(rate_limit_msg, b""))
+
+        # Second process: success
+        second_proc = MagicMock()
+        second_proc.returncode = 0
+        second_proc.pid = 1235
+        second_proc.communicate = AsyncMock(return_value=(b"ok", b""))
+
+        call_count = 0
+
+        async def fake_subprocess(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return first_proc if call_count == 1 else second_proc
+
+        with (
+            patch(
+                "providers.claude_cli_backend.asyncio.create_subprocess_exec",
+                side_effect=fake_subprocess,
+            ),
+            patch(
+                "providers.claude_cli_backend.asyncio.sleep",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "providers.claude_cli_backend._resolve_claude_bin",
+                return_value="claude",
+            ),
+            patch(
+                "providers.claude_cli_backend._session_exists",
+                return_value=False,
+            ),
+            patch.dict("os.environ", {"CLAUDE_RETRY_DELAY_SECONDS": "0"}),
+        ):
+            from providers.claude_cli_backend import _run_claude
+
+            result = await _run_claude("hello", cwd="/tmp", timeout=30)
+
+        assert call_count == 2, "expected exactly one retry after the 429-in-stdout failure"
+        assert result == "ok"

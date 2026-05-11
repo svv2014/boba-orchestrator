@@ -1,6 +1,8 @@
 """Tests for the transient-failure classifier in claude_cli_backend."""
 
+import asyncio
 import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from providers.claude_cli_backend import _is_recoverable
 
@@ -101,3 +103,52 @@ class TestEdgeCases:
     def test_multiline_permanent(self):
         stderr = "Starting claude...\ntoo many tokens in prompt\nExiting."
         assert not _is_recoverable(stderr)
+
+
+# ---------------------------------------------------------------------------
+# Integration: retry fires when 429 is in stdout with empty stderr
+# ---------------------------------------------------------------------------
+
+class TestRunClaudeRetryOnStdout:
+    """Verify _run_claude triggers the transient retry when a recoverable error
+    appears only in stdout (empty stderr), as seen with the `--output-format text`
+    code path documented in _format_claude_error.
+    """
+
+    @pytest.mark.asyncio
+    async def test_retry_triggered_on_429_in_stdout_empty_stderr(self, monkeypatch):
+        """First call exits 1 with 429 in stdout / empty stderr; retry is attempted."""
+        import os
+        monkeypatch.setenv("CLAUDE_RETRY_DELAY_SECONDS", "0")
+        monkeypatch.setenv("CLAUDE_CLI_PATH", "/fake/claude")
+
+        call_count = 0
+
+        def fake_proc(returncode, stdout_bytes, stderr_bytes):
+            proc = MagicMock()
+            proc.returncode = returncode
+            proc.pid = 12345
+            proc.communicate = AsyncMock(return_value=(stdout_bytes, stderr_bytes))
+            proc.kill = MagicMock()
+            return proc
+
+        first_proc = fake_proc(1, b"HTTP 429 Too Many Requests", b"")
+        retry_proc = fake_proc(0, b"ok result", b"")
+
+        procs = [first_proc, retry_proc]
+
+        async def mock_create_subprocess(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return procs.pop(0)
+
+        monkeypatch.setattr(
+            "asyncio.create_subprocess_exec",
+            mock_create_subprocess,
+        )
+
+        from providers.claude_cli_backend import _run_claude
+        result = await _run_claude("hello")
+
+        assert call_count == 2, "Expected two subprocess calls: initial + retry"
+        assert result == "ok result"

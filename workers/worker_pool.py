@@ -31,7 +31,6 @@ def _resolve_signal_script() -> str:
     return ""
 
 
-_SIGNAL_SCRIPT = _resolve_signal_script()
 _SIGNAL_SKIP_WARNED = False
 
 
@@ -77,7 +76,8 @@ class PoolResult:
 async def _send_signal(message: str) -> None:
     """Fire-and-forget Signal notification via shell script."""
     global _SIGNAL_SKIP_WARNED
-    if not _SIGNAL_SCRIPT:
+    script = _resolve_signal_script()
+    if not script:
         if not _SIGNAL_SKIP_WARNED:
             logger.warning(
                 "BOBA_NOTIFY_SCRIPT not set; skipping escalation notification."
@@ -86,7 +86,7 @@ async def _send_signal(message: str) -> None:
         return
     try:
         proc = await asyncio.create_subprocess_exec(
-            _SIGNAL_SCRIPT, message,
+            script, message,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )

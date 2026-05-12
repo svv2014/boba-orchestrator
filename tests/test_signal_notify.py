@@ -48,7 +48,8 @@ def test_resolve_boba_takes_precedence_over_legacy(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_send_signal_noop_when_script_unset(monkeypatch, caplog):
-    monkeypatch.setattr(wp, "_SIGNAL_SCRIPT", "")
+    monkeypatch.delenv("BOBA_NOTIFY_SCRIPT", raising=False)
+    monkeypatch.delenv("SIGNAL_NOTIFY_SCRIPT", raising=False)
     monkeypatch.setattr(wp, "_SIGNAL_SKIP_WARNED", False)
     with caplog.at_level(logging.WARNING, logger="workers.worker_pool"):
         await wp._send_signal("hello")
@@ -57,7 +58,8 @@ async def test_send_signal_noop_when_script_unset(monkeypatch, caplog):
 
 @pytest.mark.asyncio
 async def test_send_signal_warns_only_once(monkeypatch, caplog):
-    monkeypatch.setattr(wp, "_SIGNAL_SCRIPT", "")
+    monkeypatch.delenv("BOBA_NOTIFY_SCRIPT", raising=False)
+    monkeypatch.delenv("SIGNAL_NOTIFY_SCRIPT", raising=False)
     monkeypatch.setattr(wp, "_SIGNAL_SKIP_WARNED", False)
     with caplog.at_level(logging.WARNING, logger="workers.worker_pool"):
         await wp._send_signal("first")
@@ -67,7 +69,26 @@ async def test_send_signal_warns_only_once(monkeypatch, caplog):
 
 @pytest.mark.asyncio
 async def test_send_signal_sets_warned_flag(monkeypatch):
-    monkeypatch.setattr(wp, "_SIGNAL_SCRIPT", "")
+    monkeypatch.delenv("BOBA_NOTIFY_SCRIPT", raising=False)
+    monkeypatch.delenv("SIGNAL_NOTIFY_SCRIPT", raising=False)
     monkeypatch.setattr(wp, "_SIGNAL_SKIP_WARNED", False)
     await wp._send_signal("msg")
     assert wp._SIGNAL_SKIP_WARNED is True
+
+
+@pytest.mark.asyncio
+async def test_send_signal_respects_post_import_env_var(monkeypatch, tmp_path):
+    """Regression: env var set after module import must be picked up at call time."""
+    marker = tmp_path / "called"
+    script = tmp_path / "notify.sh"
+    script.write_text(f"#!/bin/sh\ntouch {marker}\n")
+    script.chmod(0o755)
+
+    monkeypatch.delenv("BOBA_NOTIFY_SCRIPT", raising=False)
+    monkeypatch.delenv("SIGNAL_NOTIFY_SCRIPT", raising=False)
+    # Set the env var post-import — the fix ensures this is honored
+    monkeypatch.setenv("BOBA_NOTIFY_SCRIPT", str(script))
+    monkeypatch.setattr(wp, "_SIGNAL_SKIP_WARNED", False)
+
+    await wp._send_signal("test message")
+    assert marker.exists(), "Script was not invoked despite BOBA_NOTIFY_SCRIPT being set after import"

@@ -562,6 +562,7 @@ async def _run_claude(
 
     if proc.returncode != 0:
         error_msg = _format_claude_error(proc.returncode or -1, stdout, stderr)
+        last_returncode = proc.returncode
 
         # Transient-failure retry: one attempt with a backoff before propagating.
         # Only applies to exit-1 (not timeouts, which are handled above).
@@ -593,6 +594,7 @@ async def _run_claude(
             # error-handling path sees the final attempt's output.
             stdout, stderr = retry_stdout, retry_stderr
             error_msg = _format_claude_error(retry_proc.returncode or 1, stdout, stderr)
+            last_returncode = retry_proc.returncode or 1
             logger.error("Retry also failed. Propagating error: %s", error_msg[:200])
 
         # Handle "No conversation found" — session exists in state file but not in Claude's storage
@@ -678,9 +680,10 @@ async def _run_claude(
                 raise
             if fresh_proc.returncode == 0:
                 return stdout.decode("utf-8", errors="replace").strip()
+            last_returncode = fresh_proc.returncode or -1
 
         raise RuntimeError(
-            f"claude CLI exited with code {proc.returncode}: {error_msg[:500]}"
+            f"claude CLI exited with code {last_returncode}: {error_msg[:500]}"
         )
 
     return stdout.decode("utf-8", errors="replace").strip()

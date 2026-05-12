@@ -1,4 +1,7 @@
-"""Tests for _resolve_claude_bin() in providers/claude_cli_backend.py."""
+"""Tests for _resolve_claude_bin() and _run_claude() in providers/claude_cli_backend.py."""
+
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -52,3 +55,50 @@ def test_resolve_claude_cli_path_takes_priority_over_claude_bin(monkeypatch):
     monkeypatch.setenv("CLAUDE_CLI_PATH", "/primary/claude")
     monkeypatch.setenv("CLAUDE_BIN", "/legacy/claude")
     assert _resolve_claude_bin() == "/primary/claude"
+
+
+def _make_proc(returncode: int, stdout: bytes = b"", stderr: bytes = b"") -> MagicMock:
+    """Return a mock subprocess with the given returncode and output."""
+    proc = MagicMock()
+    proc.returncode = returncode
+    proc.pid = 12345
+    proc.communicate = AsyncMock(return_value=(stdout, stderr))
+    proc.kill = MagicMock()
+    return proc
+
+
+@pytest.mark.asyncio
+async def test_run_claude_transient_retry_uses_retry_returncode(monkeypatch):
+    """RuntimeError exit code reflects the retry process, not the original."""
+    from providers.claude_cli_backend import _run_claude
+
+    monkeypatch.setenv("CLAUDE_CLI_PATH", "/fake/claude")
+    monkeypatch.setenv("CLAUDE_RETRY_DELAY_SECONDS", "0")
+
+    # Original proc exits 1 (triggers transient retry); retry proc exits 2.
+    original_proc = _make_proc(1, stderr=b"rate limit exceeded")
+    retry_proc = _make_proc(2, stderr=b"internal error on retry")
+
+    call_count = 0
+
+    async def fake_create_subprocess(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return original_proc
+        return retry_proc
+
+    monkeypatch.setattr("asyncio.create_subprocess_exec", fake_create_subprocess)
+    monkeypatch.setattr(
+        "providers.claude_cli_backend._is_recoverable", lambda _: True
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        await _run_claude("hello")
+
+    assert "code 2" in str(exc_info.value), (
+        f"Expected 'code 2' in error but got: {exc_info.value}"
+    )
+    assert "code 1" not in str(exc_info.value), (
+        f"Original exit code 1 leaked into error: {exc_info.value}"
+    )

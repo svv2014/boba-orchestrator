@@ -4,7 +4,8 @@ Handles:
 - Session creation with UUIDs from config
 - Token tracking across runs (parsed from claude -p JSON output)
 - Automatic rotation when approaching token limit
-- Flush to boba-memory before rotation
+- Optional flush to an external memory store before rotation
+  (configurable via BOBA_SESSION_FLUSH_SCRIPT; off by default)
 - Persistence of session state to disk
 """
 
@@ -275,7 +276,7 @@ class SessionManager:
             session.run_count,
         )
 
-        # Flush to boba-memory via event bus
+        # Optional flush to an external memory store (env-gated; see _flush_to_memory)
         if self.flush_to_memory:
             self._flush_to_memory(session)
 

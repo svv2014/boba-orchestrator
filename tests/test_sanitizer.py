@@ -173,13 +173,13 @@ def test_is_safe_dangerous():
 
 
 def test_design_system_phrase_not_flagged():
-    """Regression for boba-orchestrator#46: 'Design SYS:' style compound
-    English phrases must not trip role_tag_injection. Without the \\b word
-    boundary anchor the regex matched 'system:' anywhere — including inside
-    'Design system:', 'Operating system:', 'Build system:'.
+    """Regression for #46: 'Design system:' style compound English phrases
+    must not trip role_tag_injection. Without the start-of-line anchor the
+    regex matched 'system:' anywhere — including inside compound English
+    phrases like 'Design system:', 'Operating system:', 'Build system:'.
 
-    Each of the strings below blocked loop's PO handler on real ppl-study
-    issue comments for 24h+ before the fix landed.
+    Each of the strings below was observed as a false positive on a real
+    task prompt before the fix landed.
     """
     benign_phrases = [
         "Per CLAUDE.md design system: no hardcoded hex; use theme.palette",

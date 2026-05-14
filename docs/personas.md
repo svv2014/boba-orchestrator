@@ -116,7 +116,7 @@ local config mechanism:
 `config/personas.local.example.yaml` (tracked) serves as both
 documentation and a ready-to-copy template. It contains the four
 voice/media persona examples (`qwen-voice-reply`, `kokoro-tts`,
-`voice-project`, `boba-media`) showing the full schema in YAML form.
+`voice-project`, `media-production`) showing the full schema in YAML form.
 
 The local file is merged via `providers.persona_registry.load_local_personas()`.
 You can also call this function directly with a custom path if you need

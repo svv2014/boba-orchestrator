@@ -1,7 +1,6 @@
 """Tests for scripts/check-allowed-repos.py.
 
-Background: four production stalls (loop-monitor, boba-event, pa-scanner,
-ppl-study) were traced to silent drift between loop's project list and
+Background: production stalls were traced to silent drift between loop's project list and
 orchestrator's allowed_repos. This script is the tripwire.
 """
 from __future__ import annotations

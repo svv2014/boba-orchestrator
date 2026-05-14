@@ -53,7 +53,7 @@ _PATTERNS: list[tuple[re.Pattern, str, Severity]] = [
     (re.compile(r"you\s+are\s+now\s+(a|an|the)\s+", re.I),
      "role_override", Severity.DANGEROUS),
 
-    (re.compile(r"(system|assistant)\s*:\s*", re.I),
+    (re.compile(r"(?:^|\n)\s*(system|assistant)\s*:\s*", re.I),
      "role_tag_injection", Severity.DANGEROUS),
 
     (re.compile(r"<\s*(system|assistant|user)\s*>", re.I),

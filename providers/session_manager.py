@@ -297,12 +297,26 @@ class SessionManager:
         return new_id
 
     def _flush_to_memory(self, session: SessionState) -> None:
-        """Fire memory.session_ended event to ingest session into boba-memory."""
+        """Fire memory.session_ended event to an external memory store.
+
+        The flush is opt-in via the ``BOBA_SESSION_FLUSH_SCRIPT`` env var.
+        When unset, this is a no-op — the orchestrator does not phone home
+        or assume any particular memory backend. When set, the script is
+        invoked as ``<script> memory.session_ended <payload_json> 0 6`` and
+        its stdout/stderr are captured.
+
+        Originally hard-wired to a specific operator's event-bus script.
+        Decoupled to keep the open-source distribution backend-agnostic.
+        """
+        flush_script = os.environ.get("BOBA_SESSION_FLUSH_SCRIPT", "").strip()
+        if not flush_script:
+            logger.debug(
+                "Session flush skipped — BOBA_SESSION_FLUSH_SCRIPT unset (session=%s)",
+                session.persona,
+            )
+            return
+
         try:
-            # Find session log path
-            claude_dir = os.path.expanduser("~/.claude/projects")
-            # Session logs are stored by claude in various locations
-            # Fire the event and let the handler find the right log
             payload = json.dumps({
                 "session_id": session.session_id,
                 "persona": session.persona,
@@ -314,9 +328,7 @@ class SessionManager:
             subprocess.run(
                 [
                     "bash",
-                    os.path.expanduser(
-                        "~/.openclaw/workspace/scripts/boba-event-post.sh"
-                    ),
+                    os.path.expanduser(flush_script),
                     "memory.session_ended",
                     payload,
                     "0",
@@ -325,7 +337,10 @@ class SessionManager:
                 capture_output=True,
                 timeout=10,
             )
-            logger.info("Flushed session %s to boba-memory via event bus", session.persona)
+            logger.info(
+                "Flushed session %s via BOBA_SESSION_FLUSH_SCRIPT",
+                session.persona,
+            )
         except Exception as e:
             logger.error("Failed to flush session %s to memory: %s", session.persona, e)
 

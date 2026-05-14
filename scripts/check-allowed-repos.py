@@ -72,10 +72,20 @@ def root_is_covered(root: str, allowed: set[str]) -> bool:
 
 def main() -> int:
     config_path = os.environ.get("ORCHESTRATOR_CONFIG", "config/orchestrator.yaml")
-    loop_default = os.path.expanduser(
-        "~/.openclaw/workspace/projects/loop/config/projects.yaml"
-    )
-    loop_config_path = os.environ.get("LOOP_PROJECTS_YAML", loop_default)
+    # The drift check compares orchestrator allowed_repos against an external
+    # source-of-truth (typically loop's projects.yaml). The source is operator-
+    # configurable via $LOOP_PROJECTS_YAML; when unset the check is a no-op.
+    # Most users don't run loop and can ignore this script.
+    loop_config_path = os.environ.get("LOOP_PROJECTS_YAML", "").strip()
+    if not loop_config_path:
+        print(
+            "LOOP_PROJECTS_YAML not set, skipping drift check "
+            "(this is normal if you don't run loop)",
+            file=sys.stderr,
+        )
+        return 0
+
+    loop_config_path = os.path.expanduser(loop_config_path)
 
     if not os.path.exists(loop_config_path):
         print(
